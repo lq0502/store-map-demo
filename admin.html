@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>座標登録ツール（スタッフ用）</title>
+  <meta name="theme-color" content="#111111">
+  <style>
+    body{ margin:0; font-family: system-ui, -apple-system, "Hiragino Kaku Gothic ProN", "Noto Sans JP", sans-serif; }
+    header{ position: sticky; top:0; background:#fff; z-index:10; padding:12px; border-bottom:1px solid #E6E6E6; }
+    .row{ display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+    input{ padding:10px 12px; font-size:16px; border:1px solid #ddd; border-radius:10px; }
+    input.wide{ flex:1; min-width:260px; }
+    button{ padding:10px 12px; font-size:16px; border:0; border-radius:10px; background:#111; color:#fff; }
+    button.sub{ background:#444; }
+    main{ padding:12px; display:grid; gap:12px; }
+    .mapWrap{ position:relative; border:1px solid #eee; border-radius:14px; overflow:hidden; }
+    .mapWrap img{ width:100%; display:block; user-select:none; -webkit-user-drag:none; }
+    .marker{
+      position:absolute; width:14px; height:14px; border-radius:999px;
+      background:#ff2d55; transform:translate(-50%,-50%);
+      box-shadow:0 10px 25px rgba(0,0,0,.18);
+      border:2px solid #fff;
+      pointer-events:none;
+    }
+    .panel{ border:1px solid #eee; border-radius:14px; padding:12px; background:#fff; }
+    .k{ color:#666; font-size:13px; margin-top:6px; }
+    .mono{ font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    textarea{
+      width:100%; min-height:88px; padding:10px 12px; font-size:14px;
+      border:1px solid #ddd; border-radius:10px; resize:vertical;
+    }
+    .note{ color:#444; line-height:1.6; }
+    .pill{ display:inline-block; font-size:12px; padding:4px 8px; border:1px solid #eee; border-radius:999px; margin-right:6px; }
+  </style>
+</head>
+<body>
+<header>
+  <div class="row">
+    <input id="name" class="wide" placeholder="商品名（例：牛乳 1L）">
+    <input id="category" placeholder="カテゴリ（例：乳製品）">
+    <input id="brand" placeholder="ブランド（例：明治）">
+    <input id="area" placeholder="場所/棚（例：B-2 冷蔵）">
+    <input id="keywords" class="wide" placeholder="別名 keywords（任意：ぎゅうにゅう, milk, ミルク）">
+  </div>
+  <div class="k">
+    <span class="pill">手順</span> マップをクリック → x,y（%）取得 → 「行をコピー」 → スプレッドシートに貼る
+  </div>
+</header>
+
+<main>
+  <div class="mapWrap" id="mapWrap">
+    <img id="mapImg" src="./map.jpg" alt="店内マップ（クリックで座標取得）">
+    <div id="marker" class="marker" style="display:none;"></div>
+  </div>
+
+  <div class="panel">
+    <div class="note">
+      <b>現在の座標：</b>
+      x = <span class="mono" id="x">-</span> / y = <span class="mono" id="y">-</span>
+      <div class="k">※ x,y はマップ画像に対する割合（0〜100）です。画面サイズが変わってもズレにくい方式。</div>
+    </div>
+
+    <div class="k" style="margin-top:10px;">スプレッドシート貼り付け用（TSV：タブ区切り）</div>
+    <textarea id="tsv" class="mono" readonly placeholder="ここに出力されます"></textarea>
+
+    <div class="row" style="margin-top:10px;">
+      <button id="copy">行をコピー</button>
+      <button id="clear" class="sub">リセット</button>
+    </div>
+
+    <div class="k">ヘッダー例：name / category / brand / area / x / y / keywords</div>
+  </div>
+</main>
+
+<script>
+  const mapImg  = document.getElementById("mapImg");
+  const marker  = document.getElementById("marker");
+  const $ = (id) => document.getElementById(id);
+  const round2 = (n) => Math.round(n * 100) / 100;
+
+  function buildTSV(x, y){
+    const name = $("name").value.trim();
+    const category = $("category").value.trim();
+    const brand = $("brand").value.trim();
+    const area = $("area").value.trim();
+    const keywords = $("keywords").value.trim();
+    // 列順：name, category, brand, area, x, y, keywords
+    return [name, category, brand, area, x, y, keywords].join("\t");
+  }
+
+  function updateOutput(x, y){
+    $("x").textContent = x;
+    $("y").textContent = y;
+    $("tsv").value = buildTSV(x, y);
+  }
+
+  function placeMarker(px, py){
+    marker.style.display = "block";
+    marker.style.left = px + "px";
+    marker.style.top  = py + "px";
+  }
+
+  function getXYPercentFromClick(event){
+    const rect = mapImg.getBoundingClientRect();
+    const clickX = event.clientX - rect.left;
+    const clickY = event.clientY - rect.top;
+    const xPct = round2((clickX / rect.width) * 100);
+    const yPct = round2((clickY / rect.height) * 100);
+    placeMarker(clickX, clickY);
+    updateOutput(xPct, yPct);
+  }
+
+  mapImg.addEventListener("click", (e) => { getXYPercentFromClick(e); });
+
+  $("copy").addEventListener("click", async () => {
+    const text = $("tsv").value.trim();
+    if(!text){
+      alert("先にマップをクリックして座標を取得してください。");
+      return;
+    }
+    try{
+      await navigator.clipboard.writeText(text);
+      alert("コピーしました。スプレッドシートに貼り付けてください。");
+    }catch(e){
+      $("tsv").focus();
+      $("tsv").select();
+      document.execCommand("copy");
+      alert("コピーしました（互換モード）。スプレッドシートに貼り付けてください。");
+    }
+  });
+
+  $("clear").addEventListener("click", () => {
+    marker.style.display = "none";
+    $("x").textContent = "-";
+    $("y").textContent = "-";
+    $("tsv").value = "";
+  });
+
+  ["name","category","brand","area","keywords"].forEach(id => {
+    $(id).addEventListener("input", () => {
+      const x = $("x").textContent;
+      const y = $("y").textContent;
+      if(x !== "-" && y !== "-"){
+        $("tsv").value = buildTSV(x, y);
+      }
+    });
+  });
+</script>
+</body>
+</html>
