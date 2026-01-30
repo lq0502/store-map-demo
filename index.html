@@ -61,7 +61,7 @@
     <button id="refresh" style="background:#444;">再読込</button>
     <button id="scan" style="background:#0a7;">QRで読み取る</button>
   </div>
-  <div class="hint">候補をタップするとピンが切り替わります（iPad運用想定）</div>
+  <div class="hint">検索で複数ヒットした場合、下の候補一覧をタップするとピン表示が切り替わります（iPad運用想定）</div>
 </header>
 
 <main>
@@ -72,7 +72,7 @@
   <div class="list" id="list"></div>
 </main>
 
-  <!-- QRスキャン用モーダル（UIだけ：まず表示確認） -->
+<!-- QRスキャン用モーダル -->
 <div id="scanModal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,.65); z-index:9999;">
   <div style="position:absolute; left:50%; top:50%; transform:translate(-50%,-50%); width:min(92vw,520px); background:#fff; border-radius:14px; overflow:hidden;">
     <div style="display:flex; justify-content:space-between; align-items:center; padding:10px 12px; border-bottom:1px solid #eee;">
@@ -81,14 +81,14 @@
     </div>
 
     <div style="padding:12px;">
-      <div style="width:100%; height:260px; border-radius:12px; background:#000;"></div>
-      <div style="margin-top:10px; font-size:13px; color:#555;">
-        ※この段階ではUI表示のみ（カメラ起動は次のステップ）
+      <video id="scanVideo" playsinline autoplay muted
+        style="width:100%; height:260px; border-radius:12px; background:#000; object-fit:cover;"></video>
+      <div id="scanMsg" style="margin-top:10px; font-size:13px; color:#555;">
+        カメラを起動します。許可してください。
       </div>
     </div>
   </div>
 </div>
-
 
 <script>
   // ▼あなたのApps Script WebアプリURL
@@ -99,7 +99,6 @@
   const $ = (id) => document.getElementById(id);
 
   function norm(s){ return (s ?? "").toString().trim().toLowerCase(); }
-
   function buildIndex(row){
     return [row.name, row.category, row.brand, row.keywords, row.area, row.note].map(norm).join(" ");
   }
@@ -200,18 +199,99 @@
   $("refresh").addEventListener("click", () => init(true));
   $("q").addEventListener("keydown", (e) => { if(e.key === "Enter") search(); });
 
-    // === QRモーダル（UI表示だけ）===
+  // === QRスキャン（カメラ + QR読取）===
   const scanModal = document.getElementById("scanModal");
   const scanClose = document.getElementById("scanClose");
+  const scanVideo = document.getElementById("scanVideo");
+  const scanMsg   = document.getElementById("scanMsg");
 
-  function openScanModal(){ scanModal.style.display = "block"; }
-  function closeScanModal(){ scanModal.style.display = "none"; }
+  let scanStream = null;
+  let scanTimer = null;
+  let scanning = false; // ★重要：グローバル
+
+  function setMsg(t){ scanMsg.textContent = t; }
+
+  async function startCamera(){
+    scanStream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: { ideal: "environment" } },
+      audio: false
+    });
+    scanVideo.srcObject = scanStream;
+    await scanVideo.play();
+  }
+
+  function stopCamera(){
+    if (scanTimer) { clearInterval(scanTimer); scanTimer = null; }
+    if (scanStream) {
+      scanStream.getTracks().forEach(t => t.stop());
+      scanStream = null;
+    }
+    scanVideo.srcObject = null;
+  }
+
+  async function scanLoop(){
+    if (!("BarcodeDetector" in window)) {
+      setMsg("この環境ではQR読取（BarcodeDetector）が使えません。Safari/iPadOSの対応状況により動作しない場合があります。");
+      return;
+    }
+
+    const detector = new BarcodeDetector({ formats: ["qr_code"] });
+    setMsg("QRコードを枠内に写してください…");
+    scanning = true;
+
+    scanTimer = setInterval(async () => {
+      if (!scanning) return;
+      try{
+        if (!scanVideo || scanVideo.readyState < 2) return;
+        const barcodes = await detector.detect(scanVideo);
+        if (barcodes && barcodes.length > 0) {
+          const value = (barcodes[0].rawValue || "").trim();
+          if (!value) return;
+
+          scanning = false;
+          $("q").value = value;
+          closeScanModal();
+          search();
+        }
+      }catch(e){
+        // 検出失敗は無視（毎フレーム起こり得る）
+      }
+    }, 250);
+  }
+
+  async function openScanModal(){
+    stopCamera();
+    scanModal.style.display = "block";
+    setMsg("カメラを起動します。許可してください。");
+
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      setMsg("この環境ではカメラAPIが利用できません。");
+      return;
+    }
+
+    try{
+      setMsg("カメラを起動中…");
+      await startCamera();
+      await scanLoop();
+    }catch(e){
+      console.error(e);
+      setMsg("カメラの起動に失敗しました。権限（カメラ許可）をご確認ください。");
+      stopCamera();
+    }
+  }
+
+  function closeScanModal(){
+    scanning = false;
+    scanModal.style.display = "none";
+    stopCamera();
+    setMsg("");
+  }
 
   document.getElementById("scan").addEventListener("click", openScanModal);
   scanClose.addEventListener("click", closeScanModal);
   scanModal.addEventListener("click", (e) => { if(e.target === scanModal) closeScanModal(); });
 
-
+  // PWA登録
   if ("serviceWorker" in navigator) {
     navigator.serviceWorker.register("./sw.js");
   }
@@ -220,5 +300,3 @@
 </script>
 </body>
 </html>
-
-
