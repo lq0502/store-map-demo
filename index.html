@@ -72,6 +72,24 @@
   <div class="list" id="list"></div>
 </main>
 
+  <!-- QRスキャン用モーダル（UIだけ：まず表示確認） -->
+<div id="scanModal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,.65); z-index:9999;">
+  <div style="position:absolute; left:50%; top:50%; transform:translate(-50%,-50%); width:min(92vw,520px); background:#fff; border-radius:14px; overflow:hidden;">
+    <div style="display:flex; justify-content:space-between; align-items:center; padding:10px 12px; border-bottom:1px solid #eee;">
+      <strong>QRコード読み取り</strong>
+      <button id="scanClose" style="border:0; background:#444; color:#fff; border-radius:10px; padding:8px 10px;">閉じる</button>
+    </div>
+
+    <div style="padding:12px;">
+      <div style="width:100%; height:260px; border-radius:12px; background:#000;"></div>
+      <div style="margin-top:10px; font-size:13px; color:#555;">
+        ※この段階ではUI表示のみ（カメラ起動は次のステップ）
+      </div>
+    </div>
+  </div>
+</div>
+
+
 <script>
   // ▼あなたのApps Script WebアプリURL
   const API_URL = "https://script.google.com/macros/s/AKfycbx1qC57Bm_ypQJGSNGG8UnHL_KatQncBCNPAjtaK7d5ETO__AHqIu5LV_WrqN_oA6D_gw/exec";
@@ -182,6 +200,18 @@
   $("refresh").addEventListener("click", () => init(true));
   $("q").addEventListener("keydown", (e) => { if(e.key === "Enter") search(); });
 
+    // === QRモーダル（UI表示だけ）===
+  const scanModal = document.getElementById("scanModal");
+  const scanClose = document.getElementById("scanClose");
+
+  function openScanModal(){ scanModal.style.display = "block"; }
+  function closeScanModal(){ scanModal.style.display = "none"; }
+
+  document.getElementById("scan").addEventListener("click", openScanModal);
+  scanClose.addEventListener("click", closeScanModal);
+  scanModal.addEventListener("click", (e) => { if(e.target === scanModal) closeScanModal(); });
+
+
   if ("serviceWorker" in navigator) {
     navigator.serviceWorker.register("./sw.js");
   }
@@ -190,4 +220,5 @@
 </script>
 </body>
 </html>
+
 
