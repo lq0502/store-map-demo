@@ -83,12 +83,19 @@
     <div style="padding:12px;">
       <video id="scanVideo" playsinline autoplay muted
         style="width:100%; height:260px; border-radius:12px; background:#000; object-fit:cover;"></video>
+
+      <!-- jsQR用（非表示） -->
+      <canvas id="scanCanvas" style="display:none;"></canvas>
+
       <div id="scanMsg" style="margin-top:10px; font-size:13px; color:#555;">
         カメラを起動します。許可してください。
       </div>
     </div>
   </div>
 </div>
+
+<!-- BarcodeDetectorが使えないiPad/Safari向けフォールバック -->
+<script src="https://unpkg.com/jsqr/dist/jsQR.js"></script>
 
 <script>
   // ▼あなたのApps Script WebアプリURL
@@ -204,10 +211,11 @@
   const scanClose = document.getElementById("scanClose");
   const scanVideo = document.getElementById("scanVideo");
   const scanMsg   = document.getElementById("scanMsg");
+  const scanCanvas = document.getElementById("scanCanvas");
 
   let scanStream = null;
   let scanTimer = null;
-  let scanning = false; // ★重要：グローバル
+  let scanning = false;
 
   function setMsg(t){ scanMsg.textContent = t; }
 
@@ -229,38 +237,86 @@
     scanVideo.srcObject = null;
   }
 
+  function onDetected(value){
+    const v = String(value || "").trim();
+    if(!v) return;
+    scanning = false;
+    $("q").value = v;
+    closeScanModal();
+    search();
+  }
+
   async function scanLoop(){
-    if (!("BarcodeDetector" in window)) {
-      setMsg("この環境ではQR読取（BarcodeDetector）が使えません。Safari/iPadOSの対応状況により動作しない場合があります。");
+    const hasBarcodeDetector = ("BarcodeDetector" in window);
+    const hasJsQR = (typeof jsQR !== "undefined");
+
+    if (!hasBarcodeDetector && !hasJsQR) {
+      setMsg("この環境ではQR読取が利用できません（BarcodeDetector/ jsQRが未対応）。");
       return;
     }
 
-    const detector = new BarcodeDetector({ formats: ["qr_code"] });
-    setMsg("QRコードを枠内に写してください…");
+    // BarcodeDetector（使えれば優先）
+    let detector = null;
+    if (hasBarcodeDetector) {
+      try {
+        detector = new BarcodeDetector({ formats: ["qr_code"] });
+      } catch (e) {
+        detector = null;
+      }
+    }
+
+    // jsQR準備
+    const ctx = scanCanvas.getContext("2d", { willReadFrequently: true });
+
+    setMsg(detector ? "QRコードを枠内に写してください…" : "QRコードを枠内に写してください…（フォールバック）");
     scanning = true;
 
     scanTimer = setInterval(async () => {
       if (!scanning) return;
+
       try{
         if (!scanVideo || scanVideo.readyState < 2) return;
-        const barcodes = await detector.detect(scanVideo);
-        if (barcodes && barcodes.length > 0) {
-          const value = (barcodes[0].rawValue || "").trim();
-          if (!value) return;
 
-          scanning = false;
-          $("q").value = value;
-          closeScanModal();
-          search();
+        // (A) BarcodeDetector
+        if (detector) {
+          const barcodes = await detector.detect(scanVideo);
+          if (barcodes && barcodes.length > 0) {
+            const value = (barcodes[0].rawValue || "");
+            if (value) { onDetected(value); return; }
+          }
         }
+
+        // (B) jsQRフォールバック
+        if (hasJsQR) {
+          const vw = scanVideo.videoWidth;
+          const vh = scanVideo.videoHeight;
+          if (!vw || !vh) return;
+
+          // 軽量化：横幅最大640に縮小
+          const targetW = 640;
+          const scale = Math.min(1, targetW / vw);
+          const w = Math.floor(vw * scale);
+          const h = Math.floor(vh * scale);
+
+          scanCanvas.width = w;
+          scanCanvas.height = h;
+          ctx.drawImage(scanVideo, 0, 0, w, h);
+
+          const imageData = ctx.getImageData(0, 0, w, h);
+          const code = jsQR(imageData.data, w, h);
+          if (code && code.data) { onDetected(code.data); return; }
+        }
+
       }catch(e){
-        // 検出失敗は無視（毎フレーム起こり得る）
+        // 連続処理なので基本無視
       }
-    }, 250);
+    }, 200);
   }
 
   async function openScanModal(){
     stopCamera();
+    scanning = false;
+
     scanModal.style.display = "block";
     setMsg("カメラを起動します。許可してください。");
 
