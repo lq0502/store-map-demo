@@ -264,7 +264,7 @@
     const catLabel = (selectedCategory === "all") ? "全て" : selectedCategory;
     $("meta").innerHTML =
       `カテゴリ：<b>${catLabel}</b>${$("q").value ? ` / キーワード：<b>${$("q").value}</b>` : ""}<br>` +
-      `候補：${found.length}件（上位12件表示）`;
+      `候補：${found.length}件`;
   }
 
   async function init(force=false){
@@ -433,3 +433,4 @@
 </script>
 </body>
 </html>
+
