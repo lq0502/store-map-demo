@@ -14,29 +14,59 @@
     input { flex: 1; min-width: 220px; }
     select { min-width: 180px; background:#fff; }
     button { padding: 12px 14px; font-size: 16px; border: 0; border-radius: 10px; background:#111; color:#fff; }
+
     main { padding: 12px; }
     .mapWrap { position: relative; border-radius: 14px; overflow: hidden; border: 1px solid #eee; }
     .mapWrap img { width: 100%; display: block; user-select: none; -webkit-user-drag: none; }
+
     /* === ピン（Google Maps っぽい小さい丸）=== */
-.pin{
-  position: absolute;
-  width: 16px;
-  height: 16px;
-  border-radius: 999px;
-  background: #FF2D55;
-  border: 3px solid #fff;
-  box-shadow: 0 10px 18px rgba(0,0,0,.20);
-  transform: translate(-50%, -50%); /* 中心合わせ */
-}
+    .pin{
+      position: absolute;
+      width: 16px;
+      height: 16px;
+      border-radius: 999px;
+      background: #FF2D55;
+      border: 3px solid #fff;
+      box-shadow: 0 10px 18px rgba(0,0,0,.20);
+      transform: translate(-50%, -50%);
+    }
+
     .meta { margin-top: 10px; color:#333; line-height: 1.6; }
     .hint { color:#666; font-size: 13px; margin-top: 6px;}
+
     .list { margin-top: 12px; display: grid; gap: 8px; }
     .card { padding: 10px 12px; border: 1px solid #eee; border-radius: 12px; background:#fff; }
     .card strong { display:block; font-size: 16px; }
     .small { color:#666; font-size: 13px; margin-top: 2px; }
     .pill { display:inline-block; font-size: 12px; padding: 4px 8px; border: 1px solid #eee; border-radius: 999px; margin-right: 6px; }
+
+    /* === カテゴリーボタン（ハイブリッド検索）=== */
+    .catBar{
+      display:flex;
+      gap:8px;
+      margin-top:10px;
+      overflow:auto;
+      -webkit-overflow-scrolling: touch;
+      padding-bottom: 2px;
+    }
+    .catBtn{
+      white-space:nowrap;
+      padding:10px 12px;
+      border:1px solid #eee;
+      border-radius:999px;
+      background:#fff;
+      color:#111;
+      font-size:14px;
+      cursor:pointer;
+    }
+    .catBtn.active{
+      background:#111;
+      color:#fff;
+      border-color:#111;
+    }
   </style>
 </head>
+
 <body>
 <header>
   <div class="row">
@@ -52,6 +82,10 @@
     <button id="refresh" style="background:#444;">再読込</button>
     <button id="scan" style="background:#0a7;">QRで読み取る</button>
   </div>
+
+  <!-- カテゴリーボタン -->
+  <div class="catBar" id="catBar"></div>
+
   <!-- <div class="hint">検索で複数ヒットした場合、下の候補一覧をタップするとピン表示が切り替わります（iPad運用想定）</div> -->
 </header>
 
@@ -94,6 +128,10 @@
 
   let items = [];
   let lastFound = [];
+
+  // ★カテゴリボタン用
+  let selectedCategory = "all"; // "all" or category名
+
   const $ = (id) => document.getElementById(id);
 
   function norm(s){ return (s ?? "").toString().trim().toLowerCase(); }
@@ -152,50 +190,98 @@
       `場所：${row.area ?? "-"}${row.note ? "（" + row.note + "）" : ""}`;
   }
 
-  function search(){
+  // === カテゴリーボタン描画 ===
+  function renderCategoryButtons(){
+    const bar = $("catBar");
+    if(!bar) return;
+
+    const cats = Array.from(
+      new Set(items.map(r => (r.category ?? "").trim()).filter(Boolean))
+    ).sort((a,b)=>a.localeCompare(b,"ja"));
+
+    const allCats = ["all", ...cats];
+    bar.innerHTML = "";
+
+    allCats.forEach(cat => {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "catBtn" + (selectedCategory === cat ? " active" : "");
+      btn.textContent = (cat === "all") ? "全て" : cat;
+
+      btn.addEventListener("click", () => {
+        selectedCategory = cat;
+        renderCategoryButtons();
+        runSearch(); // 入力なしでも検索できる
+      });
+
+      bar.appendChild(btn);
+    });
+  }
+
+  // === ハイブリッド検索（カテゴリ + 自由語）===
+  function runSearch(){
     const q = norm($("q").value);
     const mode = $("mode").value;
+
     clearPins();
     $("meta").textContent = "";
     $("list").innerHTML = "";
 
-    if(!q){
-      $("meta").textContent = "検索キーワードを入力してください。";
+    // 1) カテゴリで絞り込み
+    let pool = items;
+    if (selectedCategory !== "all") {
+      pool = pool.filter(r => norm(r.category) === norm(selectedCategory));
+    }
+
+    // 2) キーワードで絞り込み（入力がある時だけ）
+    let found = pool;
+    if (q) {
+      found = pool.filter(r => {
+        if(mode === "name") return norm(r.name).includes(q);
+        if(mode === "category") return norm(r.category).includes(q);
+        if(mode === "brand") return norm(r.brand).includes(q);
+        if(mode === "keywords") return norm(r.keywords).includes(q);
+        return r._index.includes(q);
+      });
+    }
+
+    // 入力もカテゴリもない
+    if (!q && selectedCategory === "all") {
+      $("meta").textContent = "カテゴリを選ぶか、検索キーワードを入力してください。";
       return;
     }
 
-    const found = items.filter(r => {
-      if(mode === "name") return norm(r.name).includes(q);
-      if(mode === "category") return norm(r.category).includes(q);
-      if(mode === "brand") return norm(r.brand).includes(q);
-      if(mode === "keywords") return norm(r.keywords).includes(q);
-      return r._index.includes(q);
-    });
-
     if(found.length === 0){
-      $("meta").textContent = `「${q}」に一致する商品が見つかりませんでした。`;
+      $("meta").textContent = "一致する商品が見つかりませんでした。";
       return;
     }
 
     lastFound = found;
     focusResult(0);
     renderList(found);
+
+    // 任意：状態表示
+    const catLabel = (selectedCategory === "all") ? "全て" : selectedCategory;
+    $("meta").innerHTML =
+      `カテゴリ：<b>${catLabel}</b>${$("q").value ? ` / キーワード：<b>${$("q").value}</b>` : ""}<br>` +
+      `候補：${found.length}件（上位12件表示）`;
   }
 
   async function init(force=false){
     try{
       $("meta").textContent = "データ読み込み中…";
       await loadItems({force});
-      $("meta").textContent = "準備OK。検索してください。";
+      renderCategoryButtons();
+      $("meta").textContent = "準備OK。検索するか、カテゴリを選んでください。";
     }catch(e){
       console.error(e);
       $("meta").textContent = "データ取得に失敗しました。API URLと公開設定を確認してください。";
     }
   }
 
-  $("btn").addEventListener("click", search);
+  $("btn").addEventListener("click", runSearch);
   $("refresh").addEventListener("click", () => init(true));
-  $("q").addEventListener("keydown", (e) => { if(e.key === "Enter") search(); });
+  $("q").addEventListener("keydown", (e) => { if(e.key === "Enter") runSearch(); });
 
   // === QRスキャン（カメラ + QR読取）===
   const scanModal = document.getElementById("scanModal");
@@ -234,7 +320,7 @@
     scanning = false;
     $("q").value = v;
     closeScanModal();
-    search();
+    runSearch();
   }
 
   async function scanLoop(){
@@ -347,6 +433,3 @@
 </script>
 </body>
 </html>
-
-
-
